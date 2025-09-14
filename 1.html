@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+  <title>Campus Lost & Found Navigation</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css"/>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: #414141;
+      color: #eee;
+      padding: 15px;
+      font-size: 1.2rem;
+      text-align: center;
+      font-weight: bold;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      z-index: 1001;
+    }
+    #map {
+      flex: 1;
+      width: 100%;
+    }
+    .search-panel {
+      position: absolute;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      z-index: 1000;
+      max-width: 95%;
+    }
+    input, select {
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid #aaa;
+      flex: 1;
+      min-width: 120px;
+    }
+    button {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      background: #007bff;
+      color: white;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .locate-btn {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 1000;
+      background: white;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+    }
+    .locate-btn img {
+      width: 28px;
+      height: 28px;
+    }
+  </style>
+</head>
+<body>
+  <header>📍 Lost & Found Navigation</header>
+
+  <div class="search-panel">
+    <select id="fromInput">
+      <option value="">From</option>
+      <option value="current">📍 Current Location</option>
+      <option value="Hostel">Hostel</option>
+      <option value="Library">Library</option>
+      <option value="Cafeteria">Cafeteria</option>
+      <option value="Main Gate">Main Gate</option>
+    </select>
+    <input type="text" id="toInput" placeholder="To (search location)">
+    <button onclick="findRoute()">Go</button>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="locate-btn" onclick="trackLiveLocation()">
+    <img src="https://cdn-icons-png.flaticon.com/512/64/64113.png" alt="Locate">
+  </div>
+
+  <!-- Leaflet + Routing -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+  <script>
+    const map = L.map('map').setView([12.9716, 77.5946], 16);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    let routingControl = null;
+    let currentMarker = null;
+    let watchId = null;
+
+    async function getCoordinates(place) {
+      if (place.toLowerCase() === "current" || place.includes("📍")) {
+        return new Promise((resolve, reject) => {
+          if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+              pos => resolve([pos.coords.latitude, pos.coords.longitude]),
+              err => {
+                alert("⚠️ Location access denied. Please allow location.");
+                reject(null);
+              },
+              { enableHighAccuracy: true, timeout: 10000 }
+            );
+          } else {
+            alert("Geolocation not supported");
+            reject(null);
+          }
+        });
+      } else {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.length > 0) {
+          return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+        } else {
+          alert("❌ Location not found: " + place);
+          return null;
+        }
+      }
+    }
+
+    function trackLiveLocation() {
+      if (navigator.geolocation) {
+        if (watchId) {
+          navigator.geolocation.clearWatch(watchId);
+        }
+        watchId = navigator.geolocation.watchPosition(
+          pos => {
+            const coords = [pos.coords.latitude, pos.coords.longitude];
+            if (currentMarker) {
+              currentMarker.setLatLng(coords);
+            } else {
+              currentMarker = L.marker(coords, {
+                icon: L.icon({
+                  iconUrl: "https://cdn-icons-png.flaticon.com/512/64/64113.png",
+                  iconSize: [30, 30]
+                })
+              }).addTo(map).bindPopup("📍 You are here").openPopup();
+            }
+            map.setView(coords, 16);
+          },
+          err => alert("Error: " + err.message),
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      } else {
+        alert("Geolocation not supported on this device.");
+      }
+    }
+
+    async function findRoute() {
+      const fromPlace = document.getElementById("fromInput").value;
+      const toPlace = document.getElementById("toInput").value;
+
+      if (!fromPlace || !toPlace) {
+        alert("Please select From and enter To location.");
+        return;
+      }
+
+      const fromCoords = await getCoordinates(fromPlace);
+      const toCoords = await getCoordinates(toPlace);
+
+      if (!fromCoords || !toCoords) return;
+
+      if (routingControl) map.removeControl(routingControl);
+
+      routingControl = L.Routing.control({
+        waypoints: [L.latLng(...fromCoords), L.latLng(...toCoords)],
+        routeWhileDragging: true,
+        showAlternatives: true,
+        lineOptions: { addWaypoints: false }
+      }).addTo(map);
+
+      map.setView(fromCoords, 15);
+    }
+  </script>
+</body>
+</html>
